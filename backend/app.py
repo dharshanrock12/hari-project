@@ -20,18 +20,26 @@ if os.path.exists(env_path):
 
 app = Flask(__name__)
 
-# Allow local frontend + deployed frontend (set FRONTEND_URL on Render)
-frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
-CORS(app, origins=[frontend_url, "http://localhost:3000"])
+# Token auth does not need cookies, so allow frontend domains freely
+CORS(app)
 
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "assessment_db")
 
-client = MongoClient(MONGO_URI)
+client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=8000)
 db = client[DB_NAME]
 users_collection = db["users"]
 items_collection = db["items"]
 tokens_collection = db["tokens"]
+
+
+@app.route("/api/health", methods=["GET"])
+def health():
+    try:
+        client.admin.command("ping")
+        return jsonify({"status": "ok", "database": "connected"})
+    except Exception as e:
+        return jsonify({"status": "error", "database": "not connected", "detail": str(e)}), 500
 
 
 def get_user_from_token():
@@ -58,63 +66,69 @@ def login_required(f):
 
 @app.route("/api/register", methods=["POST"])
 def register():
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "No data provided"}), 400
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
 
-    name = data.get("name", "").strip()
-    email = data.get("email", "").strip().lower()
-    password = data.get("password", "")
+        name = data.get("name", "").strip()
+        email = data.get("email", "").strip().lower()
+        password = data.get("password", "")
 
-    if not name or len(name) < 2:
-        return jsonify({"error": "Name must be at least 2 characters"}), 400
-    if not email or "@" not in email:
-        return jsonify({"error": "Please enter a valid email"}), 400
-    if not password or len(password) < 6:
-        return jsonify({"error": "Password must be at least 6 characters"}), 400
+        if not name or len(name) < 2:
+            return jsonify({"error": "Name must be at least 2 characters"}), 400
+        if not email or "@" not in email:
+            return jsonify({"error": "Please enter a valid email"}), 400
+        if not password or len(password) < 6:
+            return jsonify({"error": "Password must be at least 6 characters"}), 400
 
-    if users_collection.find_one({"email": email}):
-        return jsonify({"error": "Email already registered"}), 400
+        if users_collection.find_one({"email": email}):
+            return jsonify({"error": "Email already registered"}), 400
 
-    user = {
-        "name": name,
-        "email": email,
-        "password": generate_password_hash(password),
-        "created_at": datetime.utcnow(),
-    }
-    result = users_collection.insert_one(user)
+        user = {
+            "name": name,
+            "email": email,
+            "password": generate_password_hash(password),
+            "created_at": datetime.utcnow(),
+        }
+        result = users_collection.insert_one(user)
 
-    return jsonify({"message": "Registration successful", "user_id": str(result.inserted_id)}), 201
+        return jsonify({"message": "Registration successful", "user_id": str(result.inserted_id)}), 201
+    except Exception as e:
+        return jsonify({"error": f"Database error. Check MONGO_URI on Render. Details: {str(e)}"}), 500
 
 
 @app.route("/api/login", methods=["POST"])
 def login():
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "No data provided"}), 400
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
 
-    email = data.get("email", "").strip().lower()
-    password = data.get("password", "")
+        email = data.get("email", "").strip().lower()
+        password = data.get("password", "")
 
-    if not email or not password:
-        return jsonify({"error": "Email and password are required"}), 400
+        if not email or not password:
+            return jsonify({"error": "Email and password are required"}), 400
 
-    user = users_collection.find_one({"email": email})
-    if not user or not check_password_hash(user["password"], password):
-        return jsonify({"error": "Invalid email or password"}), 401
+        user = users_collection.find_one({"email": email})
+        if not user or not check_password_hash(user["password"], password):
+            return jsonify({"error": "Invalid email or password"}), 401
 
-    token = str(ObjectId())
-    tokens_collection.insert_one({
-        "token": token,
-        "user_id": str(user["_id"]),
-        "created_at": datetime.utcnow(),
-    })
+        token = str(ObjectId())
+        tokens_collection.insert_one({
+            "token": token,
+            "user_id": str(user["_id"]),
+            "created_at": datetime.utcnow(),
+        })
 
-    return jsonify({
-        "message": "Login successful",
-        "token": token,
-        "user": {"id": str(user["_id"]), "name": user["name"], "email": user["email"]},
-    })
+        return jsonify({
+            "message": "Login successful",
+            "token": token,
+            "user": {"id": str(user["_id"]), "name": user["name"], "email": user["email"]},
+        })
+    except Exception as e:
+        return jsonify({"error": f"Database error. Check MONGO_URI on Render. Details: {str(e)}"}), 500
 
 
 @app.route("/api/logout", methods=["POST"])
