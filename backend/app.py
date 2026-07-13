@@ -20,7 +20,9 @@ if os.path.exists(env_path):
 
 app = Flask(__name__)
 
-CORS(app, origins=["http://localhost:3000"])
+# Allow local frontend + deployed frontend (set FRONTEND_URL on Render)
+frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+CORS(app, origins=[frontend_url, "http://localhost:3000"])
 
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "assessment_db")

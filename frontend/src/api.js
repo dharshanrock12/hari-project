@@ -1,4 +1,5 @@
-const API_URL = '/api';
+// Local: Vite proxy uses /api | Deployed: set VITE_API_URL to backend URL + /api
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 function getToken() {
   return localStorage.getItem('token');
